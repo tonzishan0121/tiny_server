@@ -1,0 +1,13 @@
+routes:
+  - method: GET
+    path: /
+    handler: home
+  - method: GET
+    path: /health
+    handler: health
+  - method: GET
+    path: /index.html
+    handler: static_index
+  - method: POST
+    path: /echo
+    handler: echo
