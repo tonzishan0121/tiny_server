@@ -92,6 +92,8 @@ pub fn route_request(request: &HttpRequest, routes: &[Route], state: &AppState) 
 }
 
 fn path_matches(match_type: RouteMatchType, route_path: &str, request_path: &str) -> bool {
+    let request_path = request_path.split('?').next().unwrap_or(request_path);
+
     match match_type {
         RouteMatchType::Exact => route_path == request_path,
         RouteMatchType::Prefix => request_path.starts_with(route_path),

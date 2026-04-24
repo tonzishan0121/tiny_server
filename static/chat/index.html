@@ -1,131 +1,288 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>tiny_server chat</title>
-  <style>
-    body {
-      font-family: "Trebuchet MS", sans-serif;
-      background: linear-gradient(135deg, #f3efe6, #dde8f3);
-      color: #1f2933;
-      margin: 0;
-      padding: 24px;
-    }
-    .app {
-      max-width: 760px;
-      margin: 0 auto;
-      background: rgba(255, 255, 255, 0.92);
-      border-radius: 18px;
-      padding: 24px;
-      box-shadow: 0 18px 45px rgba(31, 41, 51, 0.12);
-    }
-    h1 {
-      margin-top: 0;
-    }
-    #messages {
-      min-height: 260px;
-      max-height: 420px;
-      overflow-y: auto;
-      border: 1px solid #d5dde5;
-      border-radius: 12px;
-      padding: 16px;
-      background: #f9fbfd;
-      margin-bottom: 16px;
-    }
-    .message {
-      padding: 10px 12px;
-      border-radius: 10px;
-      background: white;
-      border: 1px solid #e3e8ee;
-      margin-bottom: 10px;
-    }
-    .message strong {
-      display: inline-block;
-      margin-bottom: 6px;
-    }
-    form {
-      display: grid;
-      gap: 10px;
-    }
-    input, textarea, button {
-      font: inherit;
-      border-radius: 10px;
-      border: 1px solid #c7d0d9;
-      padding: 10px 12px;
-    }
-    button {
-      cursor: pointer;
-      background: #1f6feb;
-      color: white;
-      border: none;
-    }
-  </style>
+  <link rel="stylesheet" href="/static/chat/style.css">
 </head>
+
 <body>
-  <div class="app">
-    <h1>tiny_server chat</h1>
-    <p>A small chat room built on top of the hand-made web server.</p>
-    <div id="messages"></div>
-    <form id="chat-form">
-      <input id="user" name="user" placeholder="Your name" value="guest">
-      <textarea id="message" name="message" placeholder="Say something" rows="3"></textarea>
-      <button type="submit">Send</button>
-    </form>
-  </div>
-  <script>
-    const messagesEl = document.getElementById("messages");
-    const formEl = document.getElementById("chat-form");
-    const userEl = document.getElementById("user");
-    const messageEl = document.getElementById("message");
-
-    function renderMessages(messages) {
-      messagesEl.innerHTML = messages.map((message) => `
-        <div class="message">
-          <strong>${escapeHtml(message.user)}</strong>
-          <div>${escapeHtml(message.text)}</div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">TS</div>
+        <div>
+          <h1>tiny_server chat</h1>
+          <p>Desktop-style room chat</p>
         </div>
-      `).join("");
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
+      </div>
 
-    function escapeHtml(value) {
-      return value
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;");
-    }
+      <section class="sidebar-card">
+        <label class="field-label" for="user">Nickname</label>
+        <input id="user" name="user" class="sidebar-input" placeholder="guest01" value="guest01">
+      </section>
 
-    async function loadMessages() {
-      const response = await fetch("/api/messages");
-      const messages = await response.json();
-      renderMessages(messages);
-    }
+      <section class="sidebar-card">
+        <div class="rooms-header">
+          <span>Rooms</span>
+          <button id="add-room" type="button" class="ghost-button">New</button>
+        </div>
+        <div id="room-list" class="room-list"></div>
+        <input id="room" name="room" class="sidebar-input" placeholder="room name" value="lobby">
+      </section>
 
-    formEl.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const body = new URLSearchParams({
-        user: userEl.value,
-        message: messageEl.value,
-      });
+      <section class="sidebar-card status-card">
+        <div class="status-title">Connection</div>
+        <div id="status" class="status-text">Connecting to room lobby...</div>
+      </section>
+    </aside>
 
-      const response = await fetch("/api/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body,
-      });
+    <main class="chat-panel">
+      <header class="chat-header">
+        <div>
+          <div class="chat-header-label">Current room</div>
+          <div id="room-title" class="chat-header-title">lobby</div>
+        </div>
+        <div id="room-summary" class="chat-header-summary">Loading messages...</div>
+      </header>
 
-      if (response.ok) {
-        messageEl.value = "";
-        await loadMessages();
+      <section id="messages" class="messages"></section>
+
+      <form id="chat-form" class="composer">
+        <textarea id="message" name="message" placeholder="Type a message" rows="3"></textarea>
+        <div class="composer-actions">
+          <div class="composer-tip">Enter sends through the button so validation stays visible.</div>
+          <button type="submit" class="send-button">Send</button>
+        </div>
+      </form>
+    </main>
+  </div>
+  <script>(function () {
+      const DEFAULT_ROOMS = ["lobby", "rust", "music", "gaming"];
+      const POLL_INTERVAL_MS = 2000;
+
+      const messagesEl = document.getElementById("messages");
+      const formEl = document.getElementById("chat-form");
+      const userEl = document.getElementById("user");
+      const roomEl = document.getElementById("room");
+      const roomListEl = document.getElementById("room-list");
+      const messageEl = document.getElementById("message");
+      const statusEl = document.getElementById("status");
+      const roomTitleEl = document.getElementById("room-title");
+      const roomSummaryEl = document.getElementById("room-summary");
+      const addRoomButton = document.getElementById("add-room");
+
+      let knownRooms = [...DEFAULT_ROOMS];
+
+      function escapeHtml(value) {
+        return value
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
       }
-    });
 
-    loadMessages();
-    setInterval(loadMessages, 2000);
+      function formatTime(seconds) {
+        return new Date(seconds * 1000).toLocaleString();
+      }
+
+      function currentRoom() {
+        const room = roomEl.value.trim().toLowerCase();
+        return room || "lobby";
+      }
+
+      function currentUser() {
+        return userEl.value.trim();
+      }
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.style.color = isError ? "#a61b3b" : "#334155";
+      }
+
+      async function readApiResponse(response) {
+        let payload;
+        try {
+          payload = await response.json();
+        } catch (_) {
+          return { ok: false, message: "Invalid server response", data: null };
+        }
+
+        if (!payload.ok) {
+          const message = payload.error?.message || payload.message || "Request failed";
+          return { ok: false, message, data: null };
+        }
+
+        return { ok: true, message: payload.message || "ok", data: payload.data };
+      }
+
+      function addKnownRoom(room) {
+        if (!room || knownRooms.includes(room)) {
+          return;
+        }
+        knownRooms.push(room);
+      }
+
+      function renderRoomList(messages) {
+        const current = currentRoom();
+        const counts = new Map();
+
+        for (const room of knownRooms) {
+          counts.set(room, 0);
+        }
+        for (const message of messages) {
+          counts.set(message.room, (counts.get(message.room) || 0) + 1);
+          addKnownRoom(message.room);
+        }
+
+        roomListEl.innerHTML = knownRooms
+          .map((room) => {
+            const activeClass = room === current ? " active" : "";
+            const count = counts.get(room) || 0;
+            return `
+          <button type="button" class="room-item${activeClass}" data-room="${escapeHtml(room)}">
+            <div>
+              <div class="room-name">${escapeHtml(room)}</div>
+              <div class="room-preview">${count > 0 ? `${count} messages` : "No messages yet"}</div>
+            </div>
+            <div class="room-count">${count}</div>
+          </button>
+        `;
+          })
+          .join("");
+      }
+
+      function renderMessages(messages) {
+        const current = currentRoom();
+        const selfUser = currentUser();
+
+        if (messages.length === 0) {
+          messagesEl.innerHTML = `
+        <div class="message system">
+          <div class="message-head">
+            <span class="message-user">system</span>
+            <span class="message-room">${escapeHtml(current)}</span>
+          </div>
+          <div class="message-body">No messages yet. Start the conversation.</div>
+        </div>
+      `;
+          return;
+        }
+
+        messagesEl.innerHTML = messages
+          .map((message) => {
+            const selfClass = message.user === selfUser ? " self" : "";
+            const systemClass = message.user === "system" ? " system" : "";
+            return `
+          <article class="message${selfClass}${systemClass}">
+            <div class="message-head">
+              <span class="message-user">${escapeHtml(message.user)}</span>
+              <span class="message-room">${escapeHtml(message.room)}</span>
+              <span class="message-time">${formatTime(message.created_at_secs)}</span>
+            </div>
+            <div class="message-body">${escapeHtml(message.text)}</div>
+          </article>
+        `;
+          })
+          .join("");
+
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      async function loadMessages() {
+        const room = currentRoom();
+        roomTitleEl.textContent = room;
+
+        const response = await fetch(`/api/messages?room=${encodeURIComponent(room)}`);
+        const payload = await readApiResponse(response);
+        if (!payload.ok) {
+          setStatus(payload.message, true);
+          return;
+        }
+
+        const messages = payload.data;
+        for (const message of messages) {
+          addKnownRoom(message.room);
+        }
+
+        renderRoomList(messages);
+        renderMessages(messages);
+        roomSummaryEl.textContent = `${messages.length} message${messages.length === 1 ? "" : "s"} in this room`;
+        setStatus(`Connected to room ${room}.`);
+      }
+
+      async function submitMessage(event) {
+        event.preventDefault();
+        setStatus("Sending message...");
+
+        const room = currentRoom();
+        const body = new URLSearchParams({
+          room,
+          user: currentUser(),
+          message: messageEl.value,
+        });
+
+        const response = await fetch("/api/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body,
+        });
+
+        const payload = await readApiResponse(response);
+        if (payload.ok) {
+          addKnownRoom(room);
+          messageEl.value = "";
+          await loadMessages();
+          return;
+        }
+
+        setStatus(payload.message || "Failed to send message.", true);
+      }
+
+      function bindRoomInteractions() {
+        roomListEl.addEventListener("click", async (event) => {
+          const button = event.target.closest("[data-room]");
+          if (!button) {
+            return;
+          }
+
+          roomEl.value = button.dataset.room || "lobby";
+          await loadMessages();
+        });
+
+        roomEl.addEventListener("change", loadMessages);
+        roomEl.addEventListener("blur", loadMessages);
+
+        addRoomButton.addEventListener("click", async () => {
+          const room = currentRoom();
+          const response = await fetch("/api/rooms", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ room }),
+          });
+          const payload = await readApiResponse(response);
+          if (!payload.ok) {
+            setStatus(payload.message, true);
+            return;
+          }
+
+          addKnownRoom(room);
+          await loadMessages();
+        });
+      }
+
+      formEl.addEventListener("submit", submitMessage);
+      bindRoomInteractions();
+      loadMessages();
+      setInterval(loadMessages, POLL_INTERVAL_MS);
+    })();
   </script>
 </body>
+
 </html>

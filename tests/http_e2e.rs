@@ -99,12 +99,12 @@ fn wrong_method_returns_405() {
 fn unknown_handler_returns_500() {
     let port = reserve_port();
     let server = TestServer::start_with_config(TestServerConfig {
-        routes_yaml: "",
         server_yaml: format!(
             "host: 127.0.0.1\nport: {port}\nworker_threads: 2\nread_timeout_secs: 1\nkeep_alive_requests: 2\n"
         ),
         static_index_html: "<h1>unused</h1>\n",
         chat_index_html: include_str!("../static/chat/index.html"),
+        chat_style_css: include_str!("../static/chat/style.css"),
     });
     let mut stream = connect(&server.addr);
     let response = send_request(

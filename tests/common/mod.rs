@@ -15,10 +15,10 @@ pub struct TestServer {
 }
 
 pub struct TestServerConfig<'a> {
-    pub routes_yaml: &'a str,
     pub server_yaml: String,
     pub static_index_html: &'a str,
     pub chat_index_html: &'a str,
+    pub chat_style_css: &'a str,
 }
 
 impl TestServer {
@@ -206,12 +206,12 @@ fn wait_until_ready(addr: &str) {
 
 fn default_config_for_port(port: u16) -> TestServerConfig<'static> {
     TestServerConfig {
-        routes_yaml: include_str!("../../config/routes.yaml"),
         server_yaml: format!(
             "host: 127.0.0.1\nport: {port}\nworker_threads: 4\nread_timeout_secs: 1\nkeep_alive_requests: 2\n"
         ),
         static_index_html: include_str!("../../static/index.html"),
         chat_index_html: include_str!("../../static/chat/index.html"),
+        chat_style_css: include_str!("../../static/chat/style.css"),
     }
 }
 
@@ -226,8 +226,6 @@ fn prepare_test_root(config: TestServerConfig<'_>) -> PathBuf {
     fs::create_dir_all(root_dir.join("static")).expect("should create static dir");
     fs::create_dir_all(root_dir.join("static/chat")).expect("should create chat static dir");
 
-    fs::write(root_dir.join("config/routes.yaml"), config.routes_yaml)
-        .expect("should write routes config");
     fs::write(root_dir.join("config/server.yaml"), config.server_yaml)
         .expect("should write server config");
     fs::write(root_dir.join("static/index.html"), config.static_index_html)
@@ -237,6 +235,11 @@ fn prepare_test_root(config: TestServerConfig<'_>) -> PathBuf {
         config.chat_index_html,
     )
     .expect("should write chat fixture");
+    fs::write(
+        root_dir.join("static/chat/style.css"),
+        config.chat_style_css,
+    )
+    .expect("should write chat style fixture");
 
     root_dir
 }
