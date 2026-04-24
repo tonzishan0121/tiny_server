@@ -1,2 +1,5 @@
 host: 127.0.0.1
 port: 7878
+worker_threads: 4
+read_timeout_secs: 5
+keep_alive_requests: 8

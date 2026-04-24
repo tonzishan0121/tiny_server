@@ -1,93 +1,41 @@
-# tiny_server
+# TinyServer
 
-这算是一个满足遗憾的项目，我第一次学Cpp的时候最后目标其实就是把它做出来，这样一个可以运行在Linux平台的小型服务器程序，当然，现在我也不局限于Cpp了，改用rust来实现这样一个功能。
+这是一个用rust编写的轻量化服务器程序。  
+本项目承诺，不含一行人工代码，全程采用AI编程的方式编写。
 
-## 介绍
+## 本项目基础功能
 
-一个 **webserver（Web 服务器程序）** 的职责，本质上就是：**接收请求 → 处理请求 → 返回响应**。
+1. 读取 `config/server.yaml` 配置监听地址、端口、worker 数量和连接参数。
+2. 读取 `config/routes.yaml` 配置路由。
+3. 支持基础 HTTP 请求解析和响应构造。
+4. 支持固定线程池并发处理连接。
+5. 支持 `/`、`/health`、`/index.html`、`/echo`。
+6. 支持 `/static/*` 静态目录访问，并提供基础 `Content-Type`。
+7. 拒绝静态目录路径穿越。
+8. 输出简单访问日志和错误日志。
 
-### 一、接收和管理网络请求
+## 运行方式
 
-Webserver 首先负责和客户端（浏览器、App等）建立通信。
+开发模式：
 
-* 监听端口（通常是 80 / 443）
-* 接收 HTTP / HTTPS 请求
-* 处理连接（TCP连接建立、关闭、复用）
+```bash
+python3 run_dev.py
+```
 
-### 二、解析 HTTP 请求
+生产模式：
 
-客户端发来的请求是原始数据，webserver需要理解它：
+```bash
+python3 run_prod.py
+```
 
-* 解析请求行（GET / POST / PUT 等）
-* 解析请求头（Cookie、User-Agent、Authorization 等）
-* 解析请求体（比如表单、JSON）
+默认监听地址是 `http://127.0.0.1:7878`。
 
+## 常用验证
 
-### 三、路由与分发请求
-
-根据 URL 决定请求该交给谁处理：
-
-* `/index.html` → 返回静态文件
-* `/api/user` → 交给后端程序（如 Python / Node / Rust）
-
-Webserver 通常直接处理：
-
-* HTML
-* CSS
-* JavaScript
-* 图片、视频
-
-例如：
-
-* Nginx
-* Apache HTTP Server
-
-### 五、与应用程序交互（动态内容）
-
-对于动态请求：
-
-* 转发给后端（如 Flask / Spring / Express）
-* 或通过协议：
-
-  * CGI / FastCGI
-  * 反向代理（reverse proxy）
-
-比如：
-
-* 用户登录
-* 数据库查询
-* API 返回 JSON
-
-### 六、构造并返回响应
-
-处理完后，webserver负责返回标准 HTTP 响应：
-
-* 状态码（200 / 404 / 500）
-* 响应头
-* 响应体（HTML / JSON 等）
-
-### 七、安全与访问控制
-
-Webserver 还承担基础安全职责：
-
-* HTTPS（SSL/TLS 加密）
-* 限制访问（IP、权限）
-* 防止简单攻击（如请求洪泛）
-
-### 八、性能优化
-
-为了提高效率，它还会：
-
-* 连接复用（Keep-Alive）
-* 缓存（Cache-Control）
-* 压缩（Gzip / Brotli）
-* 负载均衡（分发请求到多个服务器）
-
-### 九、日志与监控
-
-记录系统运行情况：
-
-* 访问日志（谁访问了什么）
-* 错误日志（哪里出错了）
-
-方便排查问题
+```bash
+curl http://127.0.0.1:7878/
+curl http://127.0.0.1:7878/health
+curl http://127.0.0.1:7878/index.html
+curl http://127.0.0.1:7878/static/index.html
+curl -X POST http://127.0.0.1:7878/echo -d 'hello'
+```

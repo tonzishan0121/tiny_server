@@ -1,3 +1,5 @@
 /target
 .codex
 AGENTS.md
+.vscode/
+agent/
