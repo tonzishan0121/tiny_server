@@ -1,0 +1,2 @@
+driver: sqlite
+path: data/db.sqlite3

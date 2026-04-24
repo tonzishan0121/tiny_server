@@ -1,13 +1,19 @@
 mod app_state;
 mod chat_app;
-mod server_core;
+mod concurrency;
+mod config;
+#[allow(dead_code, unused_imports)]
+mod database;
+mod http;
+mod router;
+mod server;
 
 use app_state::AppState;
 use chat_app::handlers::{
-    api_health, api_meta, chat_page, create_message, create_room, list_messages, list_rooms,
+    api_health, api_meta, chat_page, create_message, create_room, delete_room, list_messages,
+    list_rooms, rename_room,
 };
-use server_core::config;
-use server_core::router::{
+use router::{
     debug_error_handler, echo_handler, health_handler, home_handler, static_handler,
     static_index_handler,
 };
@@ -16,7 +22,7 @@ fn main() {
     let server_config =
         config::load_server_config("config/server.yaml").expect("failed to load server config");
     let addr = format!("{}:{}", server_config.host, server_config.port);
-    let app_state = AppState::new();
+    let app_state = AppState::new().expect("failed to initialize app state");
     let routes = routes![
         GET "/" => home_handler,
         GET "/health" => health_handler,
@@ -29,10 +35,11 @@ fn main() {
         GET "/api/meta" => api_meta,
         GET "/api/rooms" => list_rooms,
         POST "/api/rooms" => create_room,
+        POST "/api/rooms/rename" => rename_room,
+        POST "/api/rooms/delete" => delete_room,
         GET "/api/messages" => list_messages,
         POST "/api/messages" => create_message,
     ];
 
-    server_core::server::run(&addr, server_config, routes, app_state)
-        .expect("failed to run server");
+    server::run(&addr, server_config, routes, app_state).expect("failed to run server");
 }

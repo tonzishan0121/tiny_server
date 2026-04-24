@@ -19,6 +19,7 @@
 | `1101` | `ROOM_INVALID` | Room name is invalid |
 | `1102` | `ROOM_ALREADY_EXISTS` | Room already exists |
 | `1103` | `ROOM_NOT_FOUND` | Room does not exist |
+| `1104` | `ROOM_PROTECTED` | Room cannot be updated or deleted |
 
 ## User Errors
 

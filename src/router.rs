@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use crate::app_state::AppState;
-use crate::server_core::http::{HttpRequest, HttpResponse};
+use crate::http::{HttpRequest, HttpResponse};
 
 pub type HandlerFn = fn(&HttpRequest, &AppState) -> HttpResponse;
 
@@ -60,10 +60,10 @@ macro_rules! routes {
 #[macro_export]
 macro_rules! route_entry {
     ($method:ident, $path:literal, $handler:path, prefix) => {
-        $crate::server_core::router::Route::prefix(stringify!($method), $path, $handler)
+        $crate::router::Route::prefix(stringify!($method), $path, $handler)
     };
     ($method:ident, $path:literal, $handler:path) => {
-        $crate::server_core::router::Route::exact(stringify!($method), $path, $handler)
+        $crate::router::Route::exact(stringify!($method), $path, $handler)
     };
 }
 

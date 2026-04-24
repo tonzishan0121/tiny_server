@@ -27,7 +27,11 @@
       <section class="sidebar-card">
         <div class="rooms-header">
           <span>Rooms</span>
-          <button id="add-room" type="button" class="ghost-button">New</button>
+          <div class="room-actions">
+            <button id="add-room" type="button" class="ghost-button">New</button>
+            <button id="rename-room" type="button" class="ghost-button">Rename</button>
+            <button id="delete-room" type="button" class="ghost-button danger">Delete</button>
+          </div>
         </div>
         <div id="room-list" class="room-list"></div>
         <input id="room" name="room" class="sidebar-input" placeholder="room name" value="lobby">
@@ -60,8 +64,6 @@
     </main>
   </div>
   <script>(function () {
-      const POLL_INTERVAL_MS = 2000;
-
       const messagesEl = document.getElementById("messages");
       const formEl = document.getElementById("chat-form");
       const userEl = document.getElementById("user");
@@ -72,8 +74,14 @@
       const roomTitleEl = document.getElementById("room-title");
       const roomSummaryEl = document.getElementById("room-summary");
       const addRoomButton = document.getElementById("add-room");
+      const renameRoomButton = document.getElementById("rename-room");
+      const deleteRoomButton = document.getElementById("delete-room");
 
+      const chatEvents = new EventTarget();
       let knownRooms = [];
+      let activeRoom = "lobby";
+      let refreshInFlight = false;
+      let refreshQueued = false;
 
       function escapeHtml(value) {
         return value
@@ -88,8 +96,12 @@
       }
 
       function currentRoom() {
+        return activeRoom;
+      }
+
+      function inputRoom() {
         const room = roomEl.value.trim().toLowerCase();
-        return room || "lobby";
+        return room || activeRoom;
       }
 
       function currentUser() {
@@ -99,6 +111,18 @@
       function setStatus(message, isError = false) {
         statusEl.textContent = message;
         statusEl.style.color = isError ? "#a61b3b" : "#334155";
+      }
+
+      function requestRefresh(reason) {
+        chatEvents.dispatchEvent(new CustomEvent("chat:refresh", { detail: { reason } }));
+      }
+
+      function roomPreview(room) {
+        if (room.last_message) {
+          return `${room.last_message.user}: ${room.last_message.text}`;
+        }
+
+        return "No messages yet";
       }
 
       async function readApiResponse(response) {
@@ -137,27 +161,25 @@
         return { ok: true, data: rooms };
       }
 
-      function renderRoomList(rooms, messages) {
+      function renderRoomList(rooms) {
         const current = currentRoom();
-        const counts = new Map();
+        const roomMap = new Map();
 
         for (const room of rooms) {
-          counts.set(room.name, room.message_count || 0);
           addKnownRoom(room.name);
-        }
-        for (const message of messages) {
-          addKnownRoom(message.room);
+          roomMap.set(room.name, room);
         }
 
         roomListEl.innerHTML = knownRooms
           .map((room) => {
+            const roomData = roomMap.get(room) || { name: room, message_count: 0, last_message: null };
             const activeClass = room === current ? " active" : "";
-            const count = counts.get(room) || 0;
+            const count = roomData.message_count || 0;
             return `
           <button type="button" class="room-item${activeClass}" data-room="${escapeHtml(room)}">
             <div>
               <div class="room-name">${escapeHtml(room)}</div>
-              <div class="room-preview">${count > 0 ? `${count} messages` : "No messages yet"}</div>
+              <div class="room-preview">${escapeHtml(roomPreview(roomData))}</div>
             </div>
             <div class="room-count">${count}</div>
           </button>
@@ -204,6 +226,12 @@
       }
 
       async function refreshChatView() {
+        if (refreshInFlight) {
+          refreshQueued = true;
+          return;
+        }
+
+        refreshInFlight = true;
         const room = currentRoom();
         roomTitleEl.textContent = room;
 
@@ -217,23 +245,26 @@
           const response = await fetch(`/api/messages?room=${encodeURIComponent(room)}`);
           const payload = await readApiResponse(response);
           if (!payload.ok) {
-            renderRoomList(roomsPayload.data, []);
+            renderRoomList(roomsPayload.data);
             roomSummaryEl.textContent = "Room unavailable";
             setStatus(payload.message, true);
             return;
           }
 
           const messages = Array.isArray(payload.data) ? payload.data : [];
-          for (const message of messages) {
-            addKnownRoom(message.room);
-          }
 
-          renderRoomList(roomsPayload.data, messages);
+          renderRoomList(roomsPayload.data);
           renderMessages(messages);
           roomSummaryEl.textContent = `${messages.length} message${messages.length === 1 ? "" : "s"} in this room`;
           setStatus(`Connected to room ${room}.`);
         } catch (_) {
           setStatus("Failed to reach chat server.", true);
+        } finally {
+          refreshInFlight = false;
+          if (refreshQueued) {
+            refreshQueued = false;
+            requestRefresh("queued");
+          }
         }
       }
 
@@ -260,7 +291,7 @@
         if (payload.ok) {
           addKnownRoom(room);
           messageEl.value = "";
-          await refreshChatView();
+          requestRefresh("message-created");
           return;
         }
 
@@ -274,15 +305,14 @@
             return;
           }
 
-          roomEl.value = button.dataset.room || "lobby";
-          await refreshChatView();
+          activeRoom = button.dataset.room || "lobby";
+          roomEl.value = activeRoom;
+          renderRoomList(knownRooms.map((name) => ({ name })));
+          requestRefresh("room-selected");
         });
 
-        roomEl.addEventListener("change", refreshChatView);
-        roomEl.addEventListener("blur", refreshChatView);
-
         addRoomButton.addEventListener("click", async () => {
-          const room = currentRoom();
+          const room = inputRoom();
           const response = await fetch("/api/rooms", {
             method: "POST",
             headers: {
@@ -296,15 +326,63 @@
             return;
           }
 
-          addKnownRoom(room);
-          await refreshChatView();
+          const createdRoom = payload.data?.name || room;
+          activeRoom = createdRoom;
+          roomEl.value = createdRoom;
+          addKnownRoom(createdRoom);
+          messageEl.focus();
+          requestRefresh("room-created");
+        });
+
+        renameRoomButton.addEventListener("click", async () => {
+          const oldRoom = currentRoom();
+          const newRoom = inputRoom();
+          const response = await fetch("/api/rooms/rename", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ room: oldRoom, new_room: newRoom }),
+          });
+          const payload = await readApiResponse(response);
+          if (!payload.ok) {
+            setStatus(payload.message, true);
+            return;
+          }
+
+          activeRoom = payload.data?.name || newRoom;
+          roomEl.value = activeRoom;
+          requestRefresh("room-renamed");
+        });
+
+        deleteRoomButton.addEventListener("click", async () => {
+          const room = currentRoom();
+          const response = await fetch("/api/rooms/delete", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ room }),
+          });
+          const payload = await readApiResponse(response);
+          if (!payload.ok) {
+            setStatus(payload.message, true);
+            return;
+          }
+
+          activeRoom = "lobby";
+          roomEl.value = activeRoom;
+          requestRefresh("room-deleted");
         });
       }
 
+      chatEvents.addEventListener("chat:refresh", () => {
+        refreshChatView();
+      });
+
       formEl.addEventListener("submit", submitMessage);
       bindRoomInteractions();
-      refreshChatView();
-      setInterval(refreshChatView, POLL_INTERVAL_MS);
+      requestRefresh("init");
     })();
   </script>
 </body>

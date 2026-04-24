@@ -4,11 +4,12 @@ use std::path::Path;
 use crate::app_state::AppState;
 use crate::chat_app::api::{
     CODE_BAD_REQUEST, CODE_INTERNAL_ERROR, CODE_MESSAGE_INVALID, CODE_ROOM_ALREADY_EXISTS,
-    CODE_ROOM_INVALID, CODE_ROOM_NOT_FOUND, CODE_USER_INVALID, error_response, escape_json,
-    success_response,
+    CODE_ROOM_INVALID, CODE_ROOM_NOT_FOUND, CODE_ROOM_PROTECTED, CODE_USER_INVALID, error_response,
+    escape_json, success_response,
 };
-use crate::chat_app::state::{ChatMessage, ChatRoom, DEFAULT_ROOM};
-use crate::server_core::http::{HttpRequest, HttpResponse};
+use crate::chat_app::models::{ChatMessage, ChatRoomSummary};
+use crate::chat_app::state::DEFAULT_ROOM;
+use crate::http::{HttpRequest, HttpResponse};
 
 const MAX_USER_LEN: usize = 24;
 const MAX_ROOM_LEN: usize = 24;
@@ -16,7 +17,8 @@ const MAX_MESSAGE_LEN: usize = 400;
 
 pub fn chat_page(_: &HttpRequest, _: &AppState) -> HttpResponse {
     match fs::read(Path::new("static/chat/index.html")) {
-        Ok(content) => HttpResponse::bytes("200 OK", "text/html; charset=utf-8", content),
+        Ok(content) => HttpResponse::bytes("200 OK", "text/html; charset=utf-8", content)
+            .with_header("Cache-Control", "no-store"),
         Err(_) => error_response(
             "500 Internal Server Error",
             CODE_INTERNAL_ERROR,
@@ -83,7 +85,7 @@ pub fn create_message(request: &HttpRequest, state: &AppState) -> HttpResponse {
 }
 
 pub fn list_rooms(_: &HttpRequest, state: &AppState) -> HttpResponse {
-    let body = rooms_to_json(&state.chat.list_rooms(), &state.chat);
+    let body = rooms_to_json(&state.chat.list_room_summaries());
     success_response("200 OK", body)
 }
 
@@ -111,14 +113,65 @@ pub fn create_room(request: &HttpRequest, state: &AppState) -> HttpResponse {
 
     let room = state
         .chat
-        .list_rooms()
+        .list_room_summaries()
         .into_iter()
-        .find(|item| item.name == room)
+        .find(|item| item.room.name == room)
         .expect("room should exist after creation");
 
+    success_response("201 Created", room_to_json(&room))
+}
+
+pub fn rename_room(request: &HttpRequest, state: &AppState) -> HttpResponse {
+    let params = parse_form_body(&request.body);
+    let old_room = params.get("room").cloned().unwrap_or_default();
+    let new_room = params.get("new_room").cloned().unwrap_or_default();
+
+    let old_room = match validate_room(&old_room) {
+        Ok(room) => room,
+        Err(message) => return business_error_for_validation(message),
+    };
+    let new_room = match validate_room(&new_room) {
+        Ok(room) => room,
+        Err(message) => return business_error_for_validation(message),
+    };
+
+    if old_room == DEFAULT_ROOM {
+        return room_protected_response(&old_room);
+    }
+    if !state.chat.has_room(&old_room) {
+        return room_not_found_response(&old_room);
+    }
+    if old_room != new_room && state.chat.has_room(&new_room) {
+        return room_already_exists_response(&new_room);
+    }
+    if old_room != new_room {
+        state.chat.rename_room(&old_room, new_room.clone());
+    }
+
+    let room = find_room_summary(state, &new_room).expect("room should exist after update");
+    success_response("200 OK", room_to_json(&room))
+}
+
+pub fn delete_room(request: &HttpRequest, state: &AppState) -> HttpResponse {
+    let params = parse_form_body(&request.body);
+    let room = params.get("room").cloned().unwrap_or_default();
+
+    let room = match validate_room(&room) {
+        Ok(room) => room,
+        Err(message) => return business_error_for_validation(message),
+    };
+
+    if room == DEFAULT_ROOM {
+        return room_protected_response(&room);
+    }
+    if !state.chat.has_room(&room) {
+        return room_not_found_response(&room);
+    }
+
+    state.chat.delete_room(&room);
     success_response(
-        "201 Created",
-        room_to_json(&room, state.chat.list_messages(&room.name).len()),
+        "200 OK",
+        format!("{{\"name\":\"{}\",\"deleted\":true}}", escape_json(&room)),
     )
 }
 
@@ -194,12 +247,8 @@ fn messages_to_json(messages: &[ChatMessage]) -> String {
     format!("[{items}]")
 }
 
-fn rooms_to_json(rooms: &[ChatRoom], chat: &crate::chat_app::state::ChatState) -> String {
-    let items = rooms
-        .iter()
-        .map(|room| room_to_json(room, chat.list_messages(&room.name).len()))
-        .collect::<Vec<_>>()
-        .join(",");
+fn rooms_to_json(rooms: &[ChatRoomSummary]) -> String {
+    let items = rooms.iter().map(room_to_json).collect::<Vec<_>>().join(",");
     format!("[{items}]")
 }
 
@@ -214,12 +263,54 @@ fn message_to_json(message: &ChatMessage) -> String {
     )
 }
 
-fn room_to_json(room: &ChatRoom, message_count: usize) -> String {
+fn room_to_json(summary: &ChatRoomSummary) -> String {
+    let last_message_json = summary
+        .last_message
+        .as_ref()
+        .map(message_to_json)
+        .unwrap_or_else(|| "null".to_string());
+
     format!(
-        "{{\"name\":\"{}\",\"created_at_secs\":{},\"message_count\":{}}}",
-        escape_json(&room.name),
-        room.created_at_secs,
-        message_count
+        "{{\"name\":\"{}\",\"created_at_secs\":{},\"message_count\":{},\"last_message\":{}}}",
+        escape_json(&summary.room.name),
+        summary.room.created_at_secs,
+        summary.message_count,
+        last_message_json
+    )
+}
+
+fn find_room_summary(state: &AppState, room: &str) -> Option<ChatRoomSummary> {
+    state
+        .chat
+        .list_room_summaries()
+        .into_iter()
+        .find(|item| item.room.name == room)
+}
+
+fn room_not_found_response(room: &str) -> HttpResponse {
+    error_response(
+        "404 Not Found",
+        CODE_ROOM_NOT_FOUND,
+        "room does not exist",
+        Some(format!("{{\"room\":\"{}\"}}", escape_json(room))),
+    )
+}
+
+fn room_already_exists_response(room: &str) -> HttpResponse {
+    error_response(
+        "409 Conflict",
+        CODE_ROOM_ALREADY_EXISTS,
+        "room already exists",
+        Some(format!("{{\"room\":\"{}\"}}", escape_json(room))),
+    )
+}
+
+fn room_protected_response(room: &str) -> HttpResponse {
+    error_response(
+        "409 Conflict",
+        CODE_ROOM_PROTECTED,
+        "room is protected",
+        Some(format!("{{\"room\":\"{}\"}}", escape_json(room))),
     )
 }
 

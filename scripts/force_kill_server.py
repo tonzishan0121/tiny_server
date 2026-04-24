@@ -9,13 +9,15 @@ import subprocess
 import time
 
 DEFAULT_PATTERN = "tiny_server"
+DEFAULT_PORT = 7878
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pid", type=int, action="append", default=[])
-    parser.add_argument("--port", type=int, action="append", default=[])
+    parser.add_argument("--port", type=int, action="append")
     parser.add_argument("--pattern", default=DEFAULT_PATTERN)
+    parser.add_argument("--no-default-port", action="store_true")
     return parser.parse_args()
 
 
@@ -23,7 +25,11 @@ def collect_pids(args: argparse.Namespace) -> list[int]:
     pids = set(args.pid)
     pids.update(find_pids_by_pattern(args.pattern))
 
-    for port in args.port:
+    ports = list(args.port or [])
+    if not args.no_default_port and DEFAULT_PORT not in ports:
+        ports.append(DEFAULT_PORT)
+
+    for port in ports:
         pids.update(find_pids_by_port(port))
 
     return sorted(pid for pid in pids if pid > 0 and pid != os.getpid())
@@ -45,9 +51,64 @@ def find_pids_by_port(port: int) -> set[int]:
             ["lsof", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"], text=True
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
-        return set()
+        return find_pids_by_port_from_proc(port)
 
     return {int(line) for line in output.splitlines() if line.strip().isdigit()}
+
+
+def find_pids_by_port_from_proc(port: int) -> set[int]:
+    listening_inodes = socket_inodes_for_port(port)
+    if not listening_inodes:
+        return set()
+
+    pids = set()
+    for proc_entry in Path("/proc").iterdir():
+        if not proc_entry.name.isdigit():
+            continue
+
+        fd_dir = proc_entry / "fd"
+        try:
+            fd_entries = list(fd_dir.iterdir())
+        except OSError:
+            continue
+
+        for fd_entry in fd_entries:
+            try:
+                target = os.readlink(fd_entry)
+            except OSError:
+                continue
+
+            if target.startswith("socket:[") and target[8:-1] in listening_inodes:
+                pids.add(int(proc_entry.name))
+                break
+
+    return pids
+
+
+def socket_inodes_for_port(port: int) -> set[str]:
+    inodes = set()
+    port_hex = f"{port:04X}"
+
+    for path in (Path("/proc/net/tcp"), Path("/proc/net/tcp6")):
+        try:
+            lines = path.read_text().splitlines()[1:]
+        except OSError:
+            continue
+
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 10:
+                continue
+
+            local_address = parts[1]
+            state = parts[3]
+            inode = parts[9]
+            _, local_port = local_address.rsplit(":", 1)
+
+            if local_port.upper() == port_hex and state == "0A":
+                inodes.add(inode)
+
+    return inodes
 
 
 def is_running(pid: int) -> bool:

@@ -3,3 +3,5 @@
 AGENTS.md
 .vscode/
 agent/
+data/
+__pycache__/

@@ -223,11 +223,17 @@ fn prepare_test_root(config: TestServerConfig<'_>) -> PathBuf {
         .as_nanos();
     let root_dir = std::env::temp_dir().join(format!("tiny_server_test_{port}_{unique}"));
     fs::create_dir_all(root_dir.join("config")).expect("should create config dir");
+    fs::create_dir_all(root_dir.join("data")).expect("should create data dir");
     fs::create_dir_all(root_dir.join("static")).expect("should create static dir");
     fs::create_dir_all(root_dir.join("static/chat")).expect("should create chat static dir");
 
     fs::write(root_dir.join("config/server.yaml"), config.server_yaml)
         .expect("should write server config");
+    fs::write(
+        root_dir.join("config/database.yaml"),
+        "driver: sqlite\npath: data/test.sqlite3\n",
+    )
+    .expect("should write database config");
     fs::write(root_dir.join("static/index.html"), config.static_index_html)
         .expect("should write static fixture");
     fs::write(

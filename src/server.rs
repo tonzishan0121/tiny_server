@@ -6,10 +6,10 @@ use std::thread;
 use std::time::Duration;
 
 use crate::app_state::AppState;
-use crate::server_core::config::ServerConfig;
-use crate::server_core::http::{HttpResponse, parse_http_request};
-use crate::server_core::router::{Route, route_request};
-use crate::server_core::thread_pool::ThreadPool;
+use crate::concurrency::ThreadPool;
+use crate::config::ServerConfig;
+use crate::http::{HttpResponse, parse_http_request};
+use crate::router::{Route, route_request};
 
 /// Starts the TCP listener and dispatches accepted connections to the worker pool.
 pub fn run(

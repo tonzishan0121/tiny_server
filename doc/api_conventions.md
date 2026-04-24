@@ -51,8 +51,10 @@ This project uses one unified JSON envelope for all chat-related API endpoints.
 2. `GET /api/meta`
 3. `GET /api/rooms`
 4. `POST /api/rooms`
-5. `GET /api/messages?room=...`
-6. `POST /api/messages`
+5. `POST /api/rooms/rename`
+6. `POST /api/rooms/delete`
+7. `GET /api/messages?room=...`
+8. `POST /api/messages`
 
 ## Development Requirements
 

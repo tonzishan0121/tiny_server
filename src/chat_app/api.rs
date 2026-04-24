@@ -1,4 +1,4 @@
-use crate::server_core::http::HttpResponse;
+use crate::http::HttpResponse;
 
 pub const CODE_OK: i32 = 0;
 
@@ -7,6 +7,7 @@ pub const CODE_BAD_REQUEST: i32 = 1000;
 pub const CODE_ROOM_INVALID: i32 = 1101;
 pub const CODE_ROOM_ALREADY_EXISTS: i32 = 1102;
 pub const CODE_ROOM_NOT_FOUND: i32 = 1103;
+pub const CODE_ROOM_PROTECTED: i32 = 1104;
 
 pub const CODE_USER_INVALID: i32 = 1201;
 pub const CODE_MESSAGE_INVALID: i32 = 1301;
