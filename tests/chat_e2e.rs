@@ -17,7 +17,9 @@ fn chat_page_returns_html() {
         Some("text/html; charset=utf-8")
     );
     assert!(response.body_text().contains("tiny_server chat"));
-    assert!(response.body_text().contains("Room"));
+    assert!(response.body_text().contains("/static/chat/style.css"));
+    assert!(response.body_text().contains("/api/rooms"));
+    assert!(response.body_text().contains("Current room"));
 }
 
 #[test]
@@ -90,7 +92,11 @@ fn chat_api_rejects_empty_message() {
     assert_eq!(response.status_code(), 400);
     assert!(response.body_text().contains("\"ok\":false"));
     assert!(response.body_text().contains("\"code\":1301"));
-    assert!(response.body_text().contains("\"message\":\"message is required\""));
+    assert!(
+        response
+            .body_text()
+            .contains("\"message\":\"message is required\"")
+    );
 }
 
 #[test]
@@ -142,7 +148,11 @@ fn chat_api_rejects_invalid_user_name() {
     assert_eq!(response.status_code(), 400);
     assert!(response.body_text().contains("\"ok\":false"));
     assert!(response.body_text().contains("\"code\":1201"));
-    assert!(response.body_text().contains("user must use letters, numbers, '-' or '_'"));
+    assert!(
+        response
+            .body_text()
+            .contains("user must use letters, numbers, '-' or '_'")
+    );
 }
 
 #[test]
@@ -203,7 +213,11 @@ fn api_health_returns_json_status() {
         Some("application/json; charset=utf-8")
     );
     assert!(response.body_text().contains("\"ok\":true"));
-    assert!(response.body_text().contains("\"service\":\"tiny_server_api\""));
+    assert!(
+        response
+            .body_text()
+            .contains("\"service\":\"tiny_server_api\"")
+    );
 }
 
 #[test]
