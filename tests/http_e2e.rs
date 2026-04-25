@@ -115,3 +115,35 @@ fn unknown_handler_returns_500() {
     assert_eq!(response.status_code(), 500);
     assert_eq!(response.body_text(), "Debug Internal Error");
 }
+
+#[test]
+fn oversized_request_returns_413() {
+    use std::io::Write;
+
+    let server = TestServer::start();
+    let mut stream = connect(&server.addr);
+
+    // Declare a 2 MiB body and stream enough bytes to exceed the 1 MiB server limit.
+    let body_len = 2 * 1024 * 1024_usize;
+    let header = format!(
+        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(header.as_bytes())
+        .expect("should write header");
+
+    // Fill enough body bytes to trigger the limit; write errors are ignored because
+    // the server may close the connection before we finish.
+    let chunk = vec![b'x'; 8 * 1024];
+    let mut sent = 0;
+    while sent < body_len {
+        if stream.write_all(&chunk).is_err() {
+            break;
+        }
+        sent += chunk.len();
+    }
+    let _ = stream.flush();
+
+    let response = common::read_response_from(&mut stream);
+    assert_eq!(response.status_code(), 413);
+}

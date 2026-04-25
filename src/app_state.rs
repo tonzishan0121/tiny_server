@@ -9,8 +9,8 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Result<Self, String> {
-        let database = database::connect_from_config("config/database.yaml")?;
+    pub fn new(database_config_path: &str) -> Result<Self, String> {
+        let database = database::connect_from_config(database_config_path)?;
         Ok(Self {
             chat: ChatState::from_database(database)?,
         })
