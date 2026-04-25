@@ -17,6 +17,50 @@
 
 ## 运行方式
 
+### Linux / macOS
+
+开发模式：
+
+```bash
+bash ./scripts/run_dev.sh
+```
+
+生产模式：
+
+```bash
+bash ./scripts/run_prod.sh
+```
+
+### Windows（CMD）
+
+开发模式：
+
+```bat
+scripts\run_dev.bat
+```
+
+生产模式：
+
+```bat
+scripts\run_prod.bat
+```
+
+### Windows（PowerShell）
+
+开发模式：
+
+```powershell
+.\scripts\run_dev.ps1
+```
+
+生产模式：
+
+```powershell
+.\scripts\run_prod.ps1
+```
+
+### 通用（需要 Python 3）
+
 开发模式：
 
 ```bash
