@@ -49,8 +49,34 @@ pub fn escape_json(value: &str) -> String {
             '\n' => escaped.push_str("\\n"),
             '\r' => escaped.push_str("\\r"),
             '\t' => escaped.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => {
+                escaped.push_str(&format!("\\u{:04x}", ch as u32));
+            }
             _ => escaped.push(ch),
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::escape_json;
+
+    #[test]
+    fn escape_json_handles_standard_characters() {
+        assert_eq!(escape_json("hello"), "hello");
+        assert_eq!(escape_json(r#"say "hi""#), r#"say \"hi\""#);
+        assert_eq!(escape_json("back\\slash"), "back\\\\slash");
+        assert_eq!(escape_json("line\nnewline"), r#"line\nnewline"#);
+        assert_eq!(escape_json("carriage\rreturn"), r#"carriage\rreturn"#);
+        assert_eq!(escape_json("tab\there"), r#"tab\there"#);
+    }
+
+    #[test]
+    fn escape_json_escapes_control_characters_below_0x20() {
+        assert_eq!(escape_json("\x00"), "\\u0000");
+        assert_eq!(escape_json("\x01"), "\\u0001");
+        assert_eq!(escape_json("\x07"), "\\u0007");
+        assert_eq!(escape_json("\x1f"), "\\u001f");
+    }
 }

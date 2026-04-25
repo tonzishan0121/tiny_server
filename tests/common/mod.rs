@@ -138,6 +138,10 @@ impl ParsedResponse {
 }
 
 fn read_response(stream: &mut TcpStream) -> ParsedResponse {
+    read_response_from(stream)
+}
+
+pub fn read_response_from(stream: &mut TcpStream) -> ParsedResponse {
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("should set timeout");

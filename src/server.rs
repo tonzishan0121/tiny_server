@@ -1,9 +1,13 @@
+use std::borrow::Cow;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+
+/// Maximum number of bytes accepted for a single HTTP request (headers + body).
+const MAX_REQUEST_BYTES: usize = 1024 * 1024; // 1 MiB
 
 use crate::app_state::AppState;
 use crate::concurrency::ThreadPool;
@@ -80,8 +84,20 @@ fn handle_client(
     stream.set_read_timeout(Some(read_timeout))?;
 
     for request_idx in 0..keep_alive_requests {
-        let Some(raw_request) = read_http_request(&mut stream)? else {
-            return Ok(());
+        let raw_request = match read_http_request(&mut stream) {
+            Ok(Some(raw)) => raw,
+            Ok(None) => return Ok(()),
+            Err(err) if err.kind() == ErrorKind::InvalidData => {
+                let response = HttpResponse::new(
+                    "413 Content Too Large",
+                    "text/plain; charset=utf-8",
+                    "Request Too Large",
+                );
+                stream.write_all(&response.to_http_bytes(false))?;
+                stream.flush()?;
+                return Ok(());
+            }
+            Err(err) => return Err(err),
         };
 
         let parsed_request = match parse_http_request(&raw_request) {
@@ -104,7 +120,8 @@ fn handle_client(
 
         println!(
             "{} {} -> {status}",
-            parsed_request.method, parsed_request.path
+            sanitize_log(&parsed_request.method),
+            sanitize_log(&parsed_request.path)
         );
         stream.write_all(&response.to_http_bytes(keep_alive))?;
         stream.flush()?;
@@ -127,6 +144,12 @@ fn read_http_request(stream: &mut TcpStream) -> std::io::Result<Option<String>> 
             Ok(0) => break,
             Ok(bytes_read) => {
                 buffer.extend_from_slice(&chunk[..bytes_read]);
+                if buffer.len() > MAX_REQUEST_BYTES {
+                    return Err(std::io::Error::new(
+                        ErrorKind::InvalidData,
+                        "request too large",
+                    ));
+                }
                 if request_is_complete(&buffer) {
                     break;
                 }
@@ -173,4 +196,13 @@ fn request_content_length(header_bytes: &[u8]) -> Option<usize> {
         }
         None
     })
+}
+
+/// Replaces ASCII control characters with spaces to prevent log injection.
+fn sanitize_log(s: &str) -> Cow<'_, str> {
+    if s.chars().any(|c| (c as u32) < 0x20) {
+        Cow::Owned(s.chars().map(|c| if (c as u32) < 0x20 { ' ' } else { c }).collect())
+    } else {
+        Cow::Borrowed(s)
+    }
 }

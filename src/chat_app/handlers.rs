@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::app_state::AppState;
 use crate::chat_app::api::{
-    CODE_BAD_REQUEST, CODE_INTERNAL_ERROR, CODE_MESSAGE_INVALID, CODE_ROOM_ALREADY_EXISTS,
+    CODE_INTERNAL_ERROR, CODE_MESSAGE_INVALID, CODE_ROOM_ALREADY_EXISTS,
     CODE_ROOM_INVALID, CODE_ROOM_NOT_FOUND, CODE_ROOM_PROTECTED, CODE_USER_INVALID, error_response,
     escape_json, success_response,
 };
@@ -14,6 +14,30 @@ use crate::http::{HttpRequest, HttpResponse};
 const MAX_USER_LEN: usize = 24;
 const MAX_ROOM_LEN: usize = 24;
 const MAX_MESSAGE_LEN: usize = 400;
+
+enum ValidationError {
+    Room(&'static str),
+    User(&'static str),
+    Message(&'static str),
+}
+
+impl ValidationError {
+    fn api_code(&self) -> i32 {
+        match self {
+            ValidationError::Room(_) => CODE_ROOM_INVALID,
+            ValidationError::User(_) => CODE_USER_INVALID,
+            ValidationError::Message(_) => CODE_MESSAGE_INVALID,
+        }
+    }
+
+    fn message(&self) -> &'static str {
+        match self {
+            ValidationError::Room(msg)
+            | ValidationError::User(msg)
+            | ValidationError::Message(msg) => msg,
+        }
+    }
+}
 
 pub fn chat_page(_: &HttpRequest, _: &AppState) -> HttpResponse {
     match fs::read(Path::new("static/chat/index.html")) {
@@ -209,33 +233,33 @@ fn parse_form_body(body: &str) -> std::collections::HashMap<String, String> {
 
 fn url_decode(value: &str) -> String {
     let bytes = value.as_bytes();
-    let mut output = String::new();
+    let mut decoded: Vec<u8> = Vec::new();
     let mut idx = 0;
 
     while idx < bytes.len() {
         match bytes[idx] {
             b'+' => {
-                output.push(' ');
+                decoded.push(b' ');
                 idx += 1;
             }
             b'%' if idx + 2 < bytes.len() => {
                 let hex = &value[idx + 1..idx + 3];
-                if let Ok(decoded) = u8::from_str_radix(hex, 16) {
-                    output.push(decoded as char);
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    decoded.push(byte);
                     idx += 3;
                 } else {
-                    output.push('%');
+                    decoded.push(b'%');
                     idx += 1;
                 }
             }
             byte => {
-                output.push(byte as char);
+                decoded.push(byte);
                 idx += 1;
             }
         }
     }
 
-    output
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 fn messages_to_json(messages: &[ChatMessage]) -> String {
@@ -314,68 +338,55 @@ fn room_protected_response(room: &str) -> HttpResponse {
     )
 }
 
-fn business_error_for_validation(message: &str) -> HttpResponse {
-    let code = if message.starts_with("room ") || message == "room is required" {
-        if message == "room is required"
-            || message == "room is too long"
-            || message == "room must use lowercase letters, numbers, '-' or '_'"
-        {
-            CODE_ROOM_INVALID
-        } else {
-            CODE_BAD_REQUEST
-        }
-    } else if message.starts_with("user ") {
-        CODE_USER_INVALID
-    } else if message.starts_with("message ") {
-        CODE_MESSAGE_INVALID
-    } else {
-        CODE_BAD_REQUEST
-    };
-
-    error_response("400 Bad Request", code, message, None)
+fn business_error_for_validation(err: ValidationError) -> HttpResponse {
+    error_response("400 Bad Request", err.api_code(), err.message(), None)
 }
 
-fn validate_room(room: &str) -> Result<String, &'static str> {
+fn validate_room(room: &str) -> Result<String, ValidationError> {
     let room = normalize_room(room);
     if room.is_empty() {
-        return Err("room is required");
+        return Err(ValidationError::Room("room is required"));
     }
     if room.len() > MAX_ROOM_LEN {
-        return Err("room is too long");
+        return Err(ValidationError::Room("room is too long"));
     }
     if !room
         .chars()
         .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
     {
-        return Err("room must use lowercase letters, numbers, '-' or '_'");
+        return Err(ValidationError::Room(
+            "room must use lowercase letters, numbers, '-' or '_'",
+        ));
     }
     Ok(room)
 }
 
-fn validate_user(user: &str) -> Result<String, &'static str> {
+fn validate_user(user: &str) -> Result<String, ValidationError> {
     let user = user.trim();
     if user.len() < 2 {
-        return Err("user must be at least 2 characters");
+        return Err(ValidationError::User("user must be at least 2 characters"));
     }
     if user.len() > MAX_USER_LEN {
-        return Err("user is too long");
+        return Err(ValidationError::User("user is too long"));
     }
     if !user
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
     {
-        return Err("user must use letters, numbers, '-' or '_'");
+        return Err(ValidationError::User(
+            "user must use letters, numbers, '-' or '_'",
+        ));
     }
     Ok(user.to_string())
 }
 
-fn validate_message(text: &str) -> Result<String, &'static str> {
+fn validate_message(text: &str) -> Result<String, ValidationError> {
     let text = text.trim();
     if text.is_empty() {
-        return Err("message is required");
+        return Err(ValidationError::Message("message is required"));
     }
-    if text.len() > MAX_MESSAGE_LEN {
-        return Err("message is too long");
+    if text.chars().count() > MAX_MESSAGE_LEN {
+        return Err(ValidationError::Message("message is too long"));
     }
     Ok(text.to_string())
 }
@@ -393,4 +404,49 @@ fn query_param(path: &str, name: &str) -> Option<String> {
         }
         None
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{url_decode, validate_message, MAX_MESSAGE_LEN};
+
+    #[test]
+    fn url_decode_handles_plus_as_space() {
+        assert_eq!(url_decode("hello+world"), "hello world");
+    }
+
+    #[test]
+    fn url_decode_handles_percent_encoded_ascii() {
+        assert_eq!(url_decode("hello%20world"), "hello world");
+        assert_eq!(url_decode("%21"), "!");
+    }
+
+    #[test]
+    fn url_decode_handles_multibyte_utf8() {
+        // %C3%A9 is UTF-8 for 'é' (U+00E9).
+        assert_eq!(url_decode("%C3%A9"), "é");
+        // %F0%9F%98%80 is UTF-8 for 😀 (U+1F600).
+        assert_eq!(url_decode("%F0%9F%98%80"), "😀");
+    }
+
+    #[test]
+    fn url_decode_passes_through_invalid_percent_sequences() {
+        assert_eq!(url_decode("%ZZ"), "%ZZ");
+        assert_eq!(url_decode("%"), "%");
+        assert_eq!(url_decode("%2"), "%2");
+    }
+
+    #[test]
+    fn validate_message_counts_characters_not_bytes() {
+        // Each emoji is 4 bytes; 400 of them exceed 400 bytes but equal MAX_MESSAGE_LEN chars.
+        let emoji_message = "😀".repeat(MAX_MESSAGE_LEN);
+        assert!(validate_message(&emoji_message).is_ok());
+
+        // MAX_MESSAGE_LEN - 1 characters should be accepted.
+        let under_limit = "😀".repeat(MAX_MESSAGE_LEN - 1);
+        assert!(validate_message(&under_limit).is_ok());
+
+        let too_long = "😀".repeat(MAX_MESSAGE_LEN + 1);
+        assert!(validate_message(&too_long).is_err());
+    }
 }

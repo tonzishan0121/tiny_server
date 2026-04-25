@@ -19,10 +19,16 @@ use router::{
 };
 
 fn main() {
+    let server_config_path = std::env::var("TINY_SERVER_CONFIG")
+        .unwrap_or_else(|_| "config/server.yaml".to_string());
+    let database_config_path = std::env::var("TINY_DATABASE_CONFIG")
+        .unwrap_or_else(|_| "config/database.yaml".to_string());
+
     let server_config =
-        config::load_server_config("config/server.yaml").expect("failed to load server config");
+        config::load_server_config(&server_config_path).expect("failed to load server config");
     let addr = format!("{}:{}", server_config.host, server_config.port);
-    let app_state = AppState::new().expect("failed to initialize app state");
+    let app_state =
+        AppState::new(&database_config_path).expect("failed to initialize app state");
     let routes = routes![
         GET "/" => home_handler,
         GET "/health" => health_handler,

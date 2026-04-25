@@ -24,6 +24,7 @@ pub enum Database {
 /// Common behavior expected from a database connection.
 pub trait DatabaseConnection {
     fn execute(&self, sql: &str) -> Result<(), String>;
+    fn execute_with_params(&self, sql: &str, params: &[&str]) -> Result<(), String>;
     fn query(&self, sql: &str) -> Result<Vec<DatabaseRow>, String>;
 }
 
@@ -39,6 +40,12 @@ impl DatabaseConnection for Database {
     fn execute(&self, sql: &str) -> Result<(), String> {
         match self {
             Database::Sqlite(connection) => connection.execute(sql),
+        }
+    }
+
+    fn execute_with_params(&self, sql: &str, params: &[&str]) -> Result<(), String> {
+        match self {
+            Database::Sqlite(connection) => connection.execute_with_params(sql, params),
         }
     }
 

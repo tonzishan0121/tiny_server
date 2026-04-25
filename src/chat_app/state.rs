@@ -22,7 +22,7 @@ struct ChatStore {
 
 impl ChatState {
     /// Creates the chat store with one welcome message.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(default_store())),
@@ -291,52 +291,45 @@ fn persist_store_seed(database: &Database, store: &ChatStore) -> Result<(), Stri
 }
 
 fn persist_room(database: &Database, room: &ChatRoom) -> Result<(), String> {
-    database.execute(&format!(
-        "INSERT OR IGNORE INTO chat_rooms (name, created_at_secs) VALUES ('{}', {});",
-        sql_escape(&room.name),
-        room.created_at_secs
-    ))
+    database.execute_with_params(
+        &format!(
+            "INSERT OR IGNORE INTO chat_rooms (name, created_at_secs) VALUES (?, {});",
+            room.created_at_secs
+        ),
+        &[&room.name],
+    )
 }
 
 fn persist_room_rename(database: &Database, old_room: &str, new_room: &str) -> Result<(), String> {
-    database.execute(&format!(
-        "UPDATE chat_rooms SET name = '{}' WHERE name = '{}';",
-        sql_escape(new_room),
-        sql_escape(old_room)
-    ))
+    database.execute_with_params(
+        "UPDATE chat_rooms SET name = ? WHERE name = ?;",
+        &[new_room, old_room],
+    )
 }
 
 fn persist_room_delete(database: &Database, room: &str) -> Result<(), String> {
-    database.execute(&format!(
-        "DELETE FROM chat_rooms WHERE name = '{}';",
-        sql_escape(room)
-    ))
+    database.execute_with_params("DELETE FROM chat_rooms WHERE name = ?;", &[room])
 }
 
 fn persist_message(database: &Database, message: &ChatMessage) -> Result<(), String> {
-    database.execute(&format!(
-        "INSERT OR REPLACE INTO chat_messages (id, room, user, text, created_at_secs)
-        VALUES ({}, '{}', '{}', '{}', {});",
-        message.id,
-        sql_escape(&message.room),
-        sql_escape(&message.user),
-        sql_escape(&message.text),
-        message.created_at_secs
-    ))
+    database.execute_with_params(
+        &format!(
+            "INSERT OR REPLACE INTO chat_messages (id, room, user, text, created_at_secs) \
+             VALUES ({}, ?, ?, ?, {});",
+            message.id, message.created_at_secs
+        ),
+        &[&message.room, &message.user, &message.text],
+    )
 }
 
 fn prune_persisted_messages(database: &Database) -> Result<(), String> {
     database.execute(&format!(
-        "DELETE FROM chat_messages
-        WHERE id NOT IN (
-            SELECT id FROM chat_messages ORDER BY id DESC LIMIT {}
-        );",
+        "DELETE FROM chat_messages \
+         WHERE id NOT IN ( \
+             SELECT id FROM chat_messages ORDER BY id DESC LIMIT {} \
+         );",
         MAX_STORED_MESSAGES
     ))
-}
-
-fn sql_escape(value: &str) -> String {
-    value.replace('\'', "''")
 }
 
 #[cfg(test)]

@@ -8,6 +8,14 @@ use crate::database::{DatabaseConnection, DatabaseConnector, DatabaseRow};
 #[allow(non_camel_case_types)]
 enum sqlite3 {}
 
+#[allow(non_camel_case_types)]
+enum sqlite3_stmt {}
+
+const SQLITE_DONE: c_int = 101;
+
+/// SQLITE_TRANSIENT = (sqlite3_destructor_type)(-1): SQLite copies the value immediately.
+const SQLITE_TRANSIENT: *const c_void = !0usize as *const c_void;
+
 #[link(name = "sqlite3")]
 unsafe extern "C" {
     fn sqlite3_open(filename: *const c_char, db: *mut *mut sqlite3) -> c_int;
@@ -23,6 +31,22 @@ unsafe extern "C" {
         errmsg: *mut *mut c_char,
     ) -> c_int;
     fn sqlite3_free(ptr: *mut c_void);
+    fn sqlite3_prepare_v2(
+        db: *mut sqlite3,
+        sql: *const c_char,
+        nbyte: c_int,
+        stmt: *mut *mut sqlite3_stmt,
+        pztail: *mut *const c_char,
+    ) -> c_int;
+    fn sqlite3_bind_text(
+        stmt: *mut sqlite3_stmt,
+        index: c_int,
+        text: *const c_char,
+        n: c_int,
+        destructor: *const c_void,
+    ) -> c_int;
+    fn sqlite3_step(stmt: *mut sqlite3_stmt) -> c_int;
+    fn sqlite3_finalize(stmt: *mut sqlite3_stmt) -> c_int;
 }
 
 /// A small owning wrapper around one SQLite database handle.
@@ -85,6 +109,31 @@ impl SqliteConnection {
     fn last_error_message(&self) -> String {
         sqlite_error_message(self.handle.as_ptr())
     }
+
+    fn bind_and_step(&self, stmt: *mut sqlite3_stmt, params: &[&str]) -> Result<(), String> {
+        for (idx, param) in params.iter().enumerate() {
+            let cstr =
+                CString::new(*param).map_err(|_| "parameter contains a nul byte".to_string())?;
+            let code = unsafe {
+                sqlite3_bind_text(
+                    stmt,
+                    (idx + 1) as c_int,
+                    cstr.as_ptr(),
+                    -1, // -1 means null-terminated; SQLite computes the length
+                    SQLITE_TRANSIENT,
+                )
+            };
+            if code != 0 {
+                return Err(self.last_error_message());
+            }
+        }
+
+        let code = unsafe { sqlite3_step(stmt) };
+        if code != SQLITE_DONE {
+            return Err(self.last_error_message());
+        }
+        Ok(())
+    }
 }
 
 impl DatabaseConnection for SqliteConnection {
@@ -106,6 +155,28 @@ impl DatabaseConnection for SqliteConnection {
         }
 
         Err(take_error_message(error_message).unwrap_or_else(|| self.last_error_message()))
+    }
+
+    fn execute_with_params(&self, sql: &str, params: &[&str]) -> Result<(), String> {
+        let sql_c = CString::new(sql).map_err(|_| "sql contains a nul byte".to_string())?;
+        let mut raw_stmt = ptr::null_mut::<sqlite3_stmt>();
+
+        let code = unsafe {
+            sqlite3_prepare_v2(
+                self.handle.as_ptr(),
+                sql_c.as_ptr(),
+                -1,
+                &mut raw_stmt,
+                ptr::null_mut(),
+            )
+        };
+        if code != 0 {
+            return Err(self.last_error_message());
+        }
+
+        let result = self.bind_and_step(raw_stmt, params);
+        unsafe { sqlite3_finalize(raw_stmt) };
+        result
     }
 
     fn query(&self, sql: &str) -> Result<Vec<DatabaseRow>, String> {
